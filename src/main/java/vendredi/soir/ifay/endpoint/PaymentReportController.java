@@ -29,7 +29,13 @@ public class PaymentReportController {
     apiKeyAuthorizer.acceptVerifier(apiKey);
     validate(r);
     Payment payment =
-        paymentService.recordReport(r.type(), r.pspRef(), r.amount(), r.verifier(), r.verifierRevision());
+        paymentService.recordReport(
+            r.type(),
+            r.pspRef(),
+            r.amount(),
+            r.verifier().appId(),
+            r.verifier().version(),
+            r.verifier().revision());
     return new PaymentController.PaymentResponse(
         payment.id(), payment.isVerified() ? "VERIFIED" : "PENDING", payment.effectiveAmount());
   }
@@ -47,14 +53,18 @@ public class PaymentReportController {
     if (r.amount() == null || r.amount() <= 0) {
       throw new BadRequestException("amount must be strictly positive");
     }
-    if (r.verifier() == null || r.verifier().isBlank()) {
-      throw new BadRequestException("verifier is required");
+    if (r.verifier() == null
+        || r.verifier().appId() == null
+        || r.verifier().appId().isBlank()) {
+      throw new BadRequestException("verifier.appId is required");
     }
-    if (r.verifierRevision() == null || r.verifierRevision().isBlank()) {
-      throw new BadRequestException("verifierRevision is required");
+    if (r.verifier().version() == null || r.verifier().version().isBlank()) {
+      throw new BadRequestException("verifier.version is required");
     }
   }
 
+  public record VerifierInfo(String appId, String version, String revision) {}
+
   public record CreateReportRequest(
-      Provider type, String pspRef, Long amount, String verifier, String verifierRevision) {}
+      Provider type, String pspRef, Long amount, VerifierInfo verifier) {}
 }

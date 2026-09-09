@@ -1,5 +1,6 @@
 package vendredi.soir.ifay.endpoint;
 
+import java.util.regex.Pattern;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -13,6 +14,8 @@ import vendredi.soir.ifay.service.PaymentService;
 @RequestMapping("/payments/claims")
 @AllArgsConstructor
 public class PaymentController {
+  private static final Pattern E164 = Pattern.compile("^\\+[1-9]\\d{7,14}$");
+
   private final PaymentService paymentService;
   private final ApiKeyAuthorizer apiKeyAuthorizer;
 
@@ -23,7 +26,8 @@ public class PaymentController {
     apiKeyAuthorizer.acceptClient(apiKey);
     validate(r);
     return toResponse(
-        paymentService.recordClaim(r.sender(), r.receiver(), r.amount(), r.type(), r.pspRef()));
+        paymentService.recordClaim(
+            r.senderPhone(), r.receiverPhone(), r.amount(), r.type(), r.pspRef()));
   }
 
   @GetMapping("/{id}")
@@ -36,11 +40,11 @@ public class PaymentController {
     if (r == null) {
       throw new BadRequestException("Request body cannot be null");
     }
-    if (r.sender() == null || r.sender().isBlank()) {
-      throw new BadRequestException("sender is required");
+    if (r.senderPhone() == null || !E164.matcher(r.senderPhone()).matches()) {
+      throw new BadRequestException("senderPhone must be an E.164 phone number, e.g. +261341234567");
     }
-    if (r.receiver() == null || r.receiver().isBlank()) {
-      throw new BadRequestException("receiver is required");
+    if (r.receiverPhone() == null || !E164.matcher(r.receiverPhone()).matches()) {
+      throw new BadRequestException("receiverPhone must be an E.164 phone number, e.g. +261341234567");
     }
     if (r.amount() == null || r.amount() <= 0) {
       throw new BadRequestException("amount must be strictly positive");
@@ -58,7 +62,7 @@ public class PaymentController {
   }
 
   public record CreateClaimRequest(
-      String sender, String receiver, Long amount, Provider type, String pspRef) {}
+      String senderPhone, String receiverPhone, Long amount, Provider type, String pspRef) {}
 
   public record PaymentResponse(String id, String status, Long amount) {}
 }

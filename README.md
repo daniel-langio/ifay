@@ -19,22 +19,46 @@ on-device message) has to happen on the verifier's own device.
 
 ## API
 
-Every endpoint requires an `X-Api-Key` header - client apps (submitting claims) and verifier apps
-(submitting reports) use separate keys, since they represent different trust levels.
+Every endpoint (except `/ledger/anchor`, see below) requires an `X-Api-Key` header - client apps
+(submitting claims) and verifier apps (submitting reports) use separate keys, since they
+represent different trust levels.
 
-- `POST /payments/claims` - `{sender, receiver, amount, type, pspRef}` (client API key) → records
-  a payer's claim that they paid `pspRef`. Returns `{id, status, amount}`, `status` one of
-  `PENDING`/`VERIFIED`.
+- `POST /payments/claims` - `{senderPhone, receiverPhone, amount, type, pspRef}` (client API key,
+  phone numbers in E.164, e.g. `+261341234567`) → records a payer's claim that they paid
+  `pspRef`. Returns `{id, status, amount}`, `status` one of `PENDING`/`VERIFIED`. `senderPhone`/
+  `receiverPhone` resolve to a `Party` entity looked up (or created) by phone number - the same
+  number reused across payments always resolves to the same `Party`.
 - `GET /payments/claims/{id}` - (client API key) current status of a previously created claim.
-- `POST /payments/reports` - `{type, pspRef, amount, verifier, verifierRevision}` (verifier API
-  key) → records that `verifier` (at code revision `verifierRevision`) directly observed a
-  payment matching `pspRef`. Returns the same `{id, status, amount}` shape; `amount` here is
+- `POST /payments/reports` - `{type, pspRef, amount, verifier: {appId, version, revision}}`
+  (verifier API key, `revision` optional) → records that the named verifier app directly observed
+  a payment matching `pspRef`. Returns the same `{id, status, amount}` shape; `amount` here is
   always the verifier-confirmed amount once verified, never the claimed one.
 
 `type` is one of `MVOLA`, `ORANGE_MONEY`, `AIRTEL_MONEY`. `pspRef` is normalized
 (`trim().toUpperCase()`) on both the claim and report side before matching, so case differences
 between how a payer types their own reference and how a verifier extracts it from a raw message
 don't cause a false miss.
+
+## Tamper-evidence
+
+Every claim/report is also appended as an immutable event to a hash-chained, append-only ledger
+(`eventHash = hash(event content + previous event's hash)`) - this, not the `Payment` row above
+(which is just a materialized read-model kept in sync for fast/simple reads), is the actual
+source of truth for "this record wasn't altered". All ledger writes are serialized through a
+single locked `chain_tip` row, so there's no concurrent-insert race to reason about separately.
+
+- `GET /ledger/anchor` - **public, no API key** - the current chain tip `{sequence, tipHash}`.
+  Public on purpose: proving a payment wasn't altered only means something if someone other than
+  ifay itself can independently fetch and check this.
+- `GET /ledger/events?type=...&pspRef=...` - (client API key) the ordered event history for one
+  payment, each with its own hash and its predecessor's hash, resolved sender/receiver phone
+  numbers and verifier info included - what you'd hand a third party as evidence.
+
+A hash chain alone only proves internal consistency - anyone with DB write access could
+regenerate a fake one from scratch. The `Anchor Ledger` GitHub Actions workflow
+(`.github/workflows/anchor-ledger.yml`) closes that gap by committing the chain tip to
+`ledger/anchors.log` in this repo every day: a tip that was already pushed to git history
+yesterday can't be quietly rewound today without visibly disagreeing with that commit.
 
 ## Config (env vars)
 

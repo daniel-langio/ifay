@@ -1,0 +1,43 @@
+name: Anchor Ledger
+
+# Publishes ifay's current payment-ledger hash-chain tip to this repo's own git history every
+# day. This is the actual tamper-evidence mechanism: the internal hash chain alone only proves
+# internal consistency (whoever has DB write access could regenerate a fake chain from scratch),
+# but a chain tip that was already committed and pushed here yesterday can't be quietly rewound
+# without it being visibly different from what's now in `ledger/anchors.log`'s history - so
+# proving a payment wasn't altered after some date just means showing that date's anchor still
+# matches a fresh replay of today's chain.
+#
+# `/ledger/anchor` is a public, unauthenticated endpoint on purpose - anyone verifying a disputed
+# payment needs to be able to fetch it independently, not just trust ifay's word for it.
+
+on:
+  schedule:
+    - cron: '10 0 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  anchor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4.1.6
+
+      - name: Fetch current chain tip and append to the anchor log
+        run: |
+          response=$(curl --fail -s https://ifay-232007348727.southamerica-east1.run.app/ledger/anchor)
+          echo "$response"
+          sequence=$(echo "$response" | jq -r '.sequence')
+          tip_hash=$(echo "$response" | jq -r '.tipHash')
+          echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) sequence=$sequence hash=$tip_hash" >> ledger/anchors.log
+
+      - name: Commit and push the anchor
+        run: |
+          git config user.name "ifay-ledger-anchor[bot]"
+          git config user.email "bot@ifay.local"
+          git add ledger/anchors.log
+          git commit -m "chore(ledger): anchor chain tip as of $(date -u +%Y-%m-%d)"
+          git push

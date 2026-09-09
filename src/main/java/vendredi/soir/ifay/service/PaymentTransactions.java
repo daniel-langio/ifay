@@ -1,95 +1,128 @@
 package vendredi.soir.ifay.service;
 
 import java.time.Instant;
-import java.util.Optional;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import vendredi.soir.ifay.model.Payment;
+import vendredi.soir.ifay.model.PaymentEventType;
 import vendredi.soir.ifay.model.Provider;
+import vendredi.soir.ifay.repository.ChainTipEntity;
+import vendredi.soir.ifay.repository.ChainTipRepository;
 import vendredi.soir.ifay.repository.PaymentEntity;
+import vendredi.soir.ifay.repository.PaymentEventEntity;
+import vendredi.soir.ifay.repository.PaymentEventRepository;
 import vendredi.soir.ifay.repository.PaymentMapper;
 import vendredi.soir.ifay.repository.PaymentRepository;
-import vendredi.soir.ifay.model.Payment;
 
 /**
  * Split out of {@link PaymentService} solely so its {@code @Transactional} methods go through
  * Spring's proxy: calling a {@code @Transactional} method on {@code this} from within the same
- * class bypasses the proxy entirely (Spring AOP is proxy-based, not bytecode-weaved here), which
- * would silently turn {@code REQUIRES_NEW} into a no-op. Cross-bean calls don't have that problem.
+ * class would bypass Spring's proxy and silently no-op the transaction boundaries this design
+ * depends on.
+ *
+ * Every write locks the global {@link ChainTipEntity} row first, which serializes it against
+ * every other ledger write - Party/Verifier lookup-or-create, the Payment row upsert, and the
+ * event append all happen inside that one critical section, so none of them need their own
+ * locking or insert-then-catch-conflict dance.
  */
 @Component
 @AllArgsConstructor
 class PaymentTransactions {
+  private final ChainTipRepository chainTipRepository;
+  private final PaymentEventRepository paymentEventRepository;
   private final PaymentRepository paymentRepository;
   private final PaymentMapper paymentMapper;
+  private final PartyService partyService;
+  private final VerifierService verifierService;
 
   @Transactional
-  Optional<Payment> tryApplyClaim(
-      Provider type, String pspRef, String sender, String receiver, long amount) {
-    return paymentRepository
-        .findByTypeAndPspRefForUpdate(type, pspRef)
-        .map(
-            existing -> {
-              existing.setSender(sender);
-              existing.setReceiver(receiver);
-              existing.setClaimedAmount(amount);
-              existing.setSentAt(Instant.now());
-              maybeVerify(existing);
-              paymentRepository.save(existing);
-              return paymentMapper.toDomain(existing);
-            });
-  }
+  Payment recordClaim(
+      Provider type, String pspRef, String senderPhone, String receiverPhone, long amount) {
+    ChainTipEntity tip = lockTip();
+    UUID senderId = partyService.findOrCreate(senderPhone);
+    UUID receiverId = partyService.findOrCreate(receiverPhone);
+    Instant now = Instant.now();
 
-  @Transactional
-  Optional<Payment> tryApplyReport(
-      Provider type, String pspRef, long amount, String verifier, String verifierRevision) {
-    return paymentRepository
-        .findByTypeAndPspRefForUpdate(type, pspRef)
-        .map(
-            existing -> {
-              existing.setConfirmedAmount(amount);
-              existing.setVerifier(verifier);
-              existing.setVerifierRevision(verifierRevision);
-              existing.setReceivedAt(Instant.now());
-              maybeVerify(existing);
-              paymentRepository.save(existing);
-              return paymentMapper.toDomain(existing);
-            });
-  }
-
-  @Transactional(propagation = Propagation.REQUIRES_NEW)
-  Payment insertClaim(String sender, String receiver, long amount, Provider type, String pspRef) {
-    PaymentEntity entity =
-        PaymentEntity.builder()
+    PaymentEventEntity event =
+        PaymentEventEntity.builder()
             .id(UUID.randomUUID())
+            .sequence(tip.getSequence() + 1)
             .pspRef(pspRef)
             .type(type)
-            .sender(sender)
-            .receiver(receiver)
+            .eventType(PaymentEventType.CLAIM_RECORDED)
+            .senderId(senderId)
+            .receiverId(receiverId)
             .claimedAmount(amount)
-            .sentAt(Instant.now())
+            .occurredAt(now)
+            .previousEventHash(tip.getTipHash())
             .build();
-    paymentRepository.saveAndFlush(entity); // flush now so a unique violation is catchable here
-    return paymentMapper.toDomain(entity);
+    appendEvent(tip, event);
+
+    PaymentEntity payment = findOrCreatePaymentRow(type, pspRef);
+    payment.setSenderId(senderId);
+    payment.setReceiverId(receiverId);
+    payment.setClaimedAmount(amount);
+    payment.setSentAt(now);
+    maybeVerify(payment);
+    paymentRepository.save(payment);
+    return paymentMapper.toDomain(payment);
   }
 
-  @Transactional(propagation = Propagation.REQUIRES_NEW)
-  Payment insertReport(
-      Provider type, String pspRef, long amount, String verifier, String verifierRevision) {
-    PaymentEntity entity =
-        PaymentEntity.builder()
+  @Transactional
+  Payment recordReport(
+      Provider type,
+      String pspRef,
+      long amount,
+      String verifierAppId,
+      String verifierVersion,
+      String verifierRevision) {
+    ChainTipEntity tip = lockTip();
+    UUID verifierId = verifierService.findOrCreate(verifierAppId, verifierVersion, verifierRevision);
+    Instant now = Instant.now();
+
+    PaymentEventEntity event =
+        PaymentEventEntity.builder()
             .id(UUID.randomUUID())
+            .sequence(tip.getSequence() + 1)
             .pspRef(pspRef)
             .type(type)
+            .eventType(PaymentEventType.REPORT_RECORDED)
+            .verifierId(verifierId)
             .confirmedAmount(amount)
-            .verifier(verifier)
-            .verifierRevision(verifierRevision)
-            .receivedAt(Instant.now())
+            .occurredAt(now)
+            .previousEventHash(tip.getTipHash())
             .build();
-    paymentRepository.saveAndFlush(entity);
-    return paymentMapper.toDomain(entity);
+    appendEvent(tip, event);
+
+    PaymentEntity payment = findOrCreatePaymentRow(type, pspRef);
+    payment.setVerifierId(verifierId);
+    payment.setConfirmedAmount(amount);
+    payment.setReceivedAt(now);
+    maybeVerify(payment);
+    paymentRepository.save(payment);
+    return paymentMapper.toDomain(payment);
+  }
+
+  private ChainTipEntity lockTip() {
+    return chainTipRepository
+        .findTipForUpdate()
+        .orElseThrow(() -> new IllegalStateException("Chain tip row missing - startup init failed"));
+  }
+
+  private void appendEvent(ChainTipEntity tip, PaymentEventEntity event) {
+    event.setEventHash(HashChain.hash(event, tip.getTipHash()));
+    paymentEventRepository.save(event);
+    tip.setSequence(event.getSequence());
+    tip.setTipHash(event.getEventHash());
+    chainTipRepository.save(tip);
+  }
+
+  private PaymentEntity findOrCreatePaymentRow(Provider type, String pspRef) {
+    return paymentRepository
+        .findByTypeAndPspRef(type, pspRef)
+        .orElseGet(() -> PaymentEntity.builder().id(UUID.randomUUID()).type(type).pspRef(pspRef).build());
   }
 
   private void maybeVerify(PaymentEntity e) {

@@ -26,12 +26,11 @@ public class PaymentEntity {
   @Enumerated(EnumType.STRING)
   private Provider type;
 
-  private String sender;
-  private String receiver;
+  private UUID senderId;
+  private UUID receiverId;
   private Long claimedAmount;
   private Long confirmedAmount;
-  private String verifier;
-  private String verifierRevision;
+  private UUID verifierId;
   private Instant sentAt;
   private Instant receivedAt;
   private Instant verifiedAt;
