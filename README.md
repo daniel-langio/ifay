@@ -52,3 +52,9 @@ DATABASE_URL=jdbc:postgresql://localhost:5442/postgres ./gradlew bootRun
 
 Tests use Testcontainers (a real Postgres) for the integration tests - no external credentials
 needed to run the test suite.
+
+## License
+
+Copyright Daniel Langio. Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE),
+plus additional terms in the same file (no use to train/fine-tune AI models). Free for
+noncommercial use; contact langio.tehiniavo@gmail.com for a commercial license.
