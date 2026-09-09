@@ -4,6 +4,8 @@ import java.util.NoSuchElementException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -39,6 +41,18 @@ public class GlobalExceptionHandler {
   public ResponseEntity<ApiError> handleNoSuchElement(NoSuchElementException e) {
     return ResponseEntity.status(HttpStatus.NOT_FOUND)
         .body(new ApiError("NOT_FOUND", e.getMessage()));
+  }
+
+  @ExceptionHandler(MissingRequestHeaderException.class)
+  public ResponseEntity<ApiError> handleMissingHeader(MissingRequestHeaderException e) {
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        .body(new ApiError("BAD_REQUEST", e.getMessage()));
+  }
+
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  public ResponseEntity<ApiError> handleUnreadableBody(HttpMessageNotReadableException e) {
+    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+        .body(new ApiError("BAD_REQUEST", "Malformed request body"));
   }
 
   @ExceptionHandler(Exception.class)
