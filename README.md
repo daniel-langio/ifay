@@ -1,50 +1,48 @@
 # ifay
 
-A small payment service wrapping MVola (Telma's Madagascar mobile money) merchant payments,
-built to be called by other apps (starting with the [vendredi.soir.karata](https://github.com/daniel-langio/vendredi.soir.karata)
-poker app's chip deposit flow) rather than each one integrating MVola directly.
+A generalized payment recording/validation API: something claims a payment happened (a sender,
+e.g. [vendredi.soir.karata](https://github.com/daniel-langio/vendredi.soir.karata)'s chip deposit
+flow), something else independently reports that it actually observed the money move (a
+verifier), and ifay matches the two by `(type, pspRef)` and marks the payment verified once both
+sides agree. Either side can arrive first - a claim with no report yet, or a report with no claim
+yet, both just sit `PENDING` until the other side shows up. There's no timeout: a payment stays
+pending indefinitely until a matching report confirms it.
 
-Modeled after [hei-school/vola](https://github.com/hei-school/vola)'s Orange Money integration
-(a `Payment` domain with a derived - never stored - verification status), but simpler: MVola's
-API supports a merchant-initiated payment request (prompt the payer's phone to approve, then poll
-a status endpoint), so there's no need for vola's batch/event-driven reconciliation machinery -
-`GET /payments/{id}` just re-checks MVola's status endpoint live, lazily, on each call.
-
-## ⚠️ Status: not yet usable with real money
-
-- The MVola merchant account is still being set up - nothing here has been tested against a real
-  MVola sandbox or production endpoint.
-- The exact API shape in `mvola/` (endpoint paths, header names, request/response fields) is
-  built from general knowledge of MVola's API, cross-checked against a second, independent
-  open-source implementation ([paidmada-mobile-money](https://github.com/mandaniainarandriambinintsoa/paidmada-mobile-money),
-  MIT-licensed, references the real MVola devportal) which agreed on the overall shape and
-  caught two real mistakes here (a wrong status-endpoint path, a missing payload field) - but
-  it's **still not verified against a real MVola sandbox**, and that project itself isn't
-  battle-tested (small, early-stage, no confirmed production usage found). Once real sandbox
-  credentials exist, confirm every constant in `MvolaApiClient` and the response records against
-  MVola's actual docs/responses before relying on this for anything real.
+Verifiers are trusted to have actually observed the payment themselves (e.g. reading their own
+device's SMS) before calling ifay - ifay has no way to independently confirm that, so a report is
+only ever as trustworthy as the verifier holding the verifier API key. The first verifier is
+[porofo](https://github.com/daniel-langio/porofo) (Malagasy for "proof"), a separate app doing
+on-device SMS parsing for MVola/Orange Money confirmation messages - deliberately **not** part of
+this repo, since trusting a raw SMS string sent over the network would mean trusting whoever holds
+the API key to not have fabricated it; the actual verification (matching the SMS to a real
+on-device message) has to happen on the verifier's own device.
 
 ## API
 
-All endpoints require an `X-Api-Key` header (see `IFAY_API_KEY`).
+Every endpoint requires an `X-Api-Key` header - client apps (submitting claims) and verifier apps
+(submitting reports) use separate keys, since they represent different trust levels.
 
-- `POST /payments` - `{payerReference, payerMsisdn, amount, scope}` → asks MVola to prompt
-  `payerMsisdn` to approve paying `amount` Ar. Returns `{id, status: "VERIFYING", ...}`
-  immediately - the payer hasn't necessarily approved yet.
-- `GET /payments/{id}` - polls MVola's status fresh and returns the current
-  `{id, status, amountRequested, confirmedAmount}`. `status` is one of `VERIFYING`, `SUCCEEDED`,
-  `FAILED`. Once resolved, this stops calling MVola (safe to poll repeatedly).
+- `POST /payments/claims` - `{sender, receiver, amount, type, pspRef}` (client API key) → records
+  a payer's claim that they paid `pspRef`. Returns `{id, status, amount}`, `status` one of
+  `PENDING`/`VERIFIED`.
+- `GET /payments/claims/{id}` - (client API key) current status of a previously created claim.
+- `POST /payments/reports` - `{type, pspRef, amount, verifier, verifierRevision}` (verifier API
+  key) → records that `verifier` (at code revision `verifierRevision`) directly observed a
+  payment matching `pspRef`. Returns the same `{id, status, amount}` shape; `amount` here is
+  always the verifier-confirmed amount once verified, never the claimed one.
+
+`type` is one of `MVOLA`, `ORANGE_MONEY`, `AIRTEL_MONEY`. `pspRef` is normalized
+(`trim().toUpperCase()`) on both the claim and report side before matching, so case differences
+between how a payer types their own reference and how a verifier extracts it from a raw message
+don't cause a false miss.
 
 ## Config (env vars)
 
 | Var | Purpose | Default |
 |---|---|---|
 | `DATABASE_URL` | Postgres connection (`postgres://...` or `jdbc:postgresql://...`) | local dev fallback |
-| `IFAY_API_KEY` | Shared secret required on every request | insecure dev default - **must** be overridden in any real deployment |
-| `MVOLA_API_URL` | MVola API base URL | `https://devapi.mvola.mg` (sandbox) |
-| `MVOLA_CONSUMER_KEY` / `MVOLA_CONSUMER_SECRET` | OAuth2 client credentials from the MVola developer portal | none |
-| `MVOLA_PARTNER_NAME` | Registered partner name | `ifay` |
-| `MVOLA_MERCHANT_MSISDN` | The merchant's own MVola phone number (receives payments) | none |
+| `IFAY_CLIENT_API_KEY` | Shared secret for client apps submitting claims | insecure dev default - **must** be overridden in any real deployment |
+| `IFAY_VERIFIER_API_KEY` | Shared secret for verifier apps submitting reports | insecure dev default - **must** be overridden in any real deployment |
 
 ## Local dev
 
@@ -52,5 +50,5 @@ All endpoints require an `X-Api-Key` header (see `IFAY_API_KEY`).
 DATABASE_URL=jdbc:postgresql://localhost:5442/postgres ./gradlew bootRun
 ```
 
-Tests use Testcontainers (a real Postgres) for the integration test and mock `MvolaApiClient` -
-no real MVola credentials needed to run the test suite.
+Tests use Testcontainers (a real Postgres) for the integration tests - no external credentials
+needed to run the test suite.

@@ -4,26 +4,31 @@ import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.*;
+import vendredi.soir.ifay.model.Provider;
 
 @Entity
-@Table(name = "payment")
+@Table(
+    name = "payment",
+    uniqueConstraints = @UniqueConstraint(columnNames = {"type", "pspRef"}))
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
 public class PaymentEntity {
   @Id private UUID id;
-  private String payerReference;
-  private String payerMsisdn;
-  private long amountRequested;
+
+  private String pspRef;
+
+  @Enumerated(EnumType.STRING)
+  private Provider type;
+
+  private String sender;
+  private String receiver;
+  private Long claimedAmount;
   private Long confirmedAmount;
-
-  @Builder.Default private boolean pspReportedFailure = false;
-
-  private String serverCorrelationId;
-  private String scope;
-  private Instant creationInstant;
-  private Instant lastVerificationInstant;
-
-  @Builder.Default private int verificationAttemptNb = 0;
+  private String verifier;
+  private String verifierRevision;
+  private Instant sentAt;
+  private Instant receivedAt;
+  private Instant verifiedAt;
 }

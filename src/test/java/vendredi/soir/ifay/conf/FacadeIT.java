@@ -18,7 +18,7 @@ public class FacadeIT {
 
   private static final PostgresConf POSTGRES_CONF = new PostgresConf();
 
-  @Autowired private TestRestTemplate rest;
+  @Autowired protected TestRestTemplate rest;
 
   @BeforeAll
   static void beforeAll() {

@@ -4,40 +4,38 @@ import java.time.Instant;
 import lombok.Builder;
 
 /**
- * A single MVola merchant-initiated payment request: ifay asks MVola to prompt {@code
- * payerMsisdn} to approve paying {@code amountRequested}, then polls MVola's status endpoint
- * (see MvolaApiClient) using {@code serverCorrelationId} until it resolves. Status is always
- * derived, never stored directly - {@code confirmedAmount} is null until MVola reports the
- * transaction as completed, matching what it actually confirms was paid (which should equal
- * amountRequested, but the confirmed figure is the authoritative one for crediting anything).
+ * A payment is created the moment *either* side reports it - a sender's claim ("I paid this psp
+ * reference") or a receiver's report ("I received this psp reference") - whichever arrives first.
+ * Since either can arrive first, every claim-side and report-side field is nullable until that
+ * side actually shows up. {@code verifiedAt} is set the moment both agree on the same
+ * {@code (type, pspRef)}: that's the one thing that must match between them - once verified,
+ * {@code confirmedAmount} (the receiver's report) is authoritative, never {@code claimedAmount}.
+ *
+ * {@code verifier}/{@code verifierRevision} record which verification mechanism (and which
+ * version of its code) produced the match - this core is deliberately not tied to any one
+ * verifier (e.g. porofo, the SMS-based one) so more can exist side by side later, each traceable
+ * on every payment it confirmed.
  */
 @Builder(toBuilder = true)
 public record Payment(
     String id,
-    String payerReference,
-    String payerMsisdn,
-    long amountRequested,
+    String pspRef,
+    Provider type,
+    String sender,
+    String receiver,
+    Long claimedAmount,
     Long confirmedAmount,
-    boolean pspReportedFailure,
-    String serverCorrelationId,
-    String scope,
-    Instant creationInstant,
-    Instant lastVerificationInstant,
-    int verificationAttemptNb) {
+    String verifier,
+    String verifierRevision,
+    Instant sentAt,
+    Instant receivedAt,
+    Instant verifiedAt) {
 
-  public static final int MAX_VERIFICATION_ATTEMPT_NB = 20;
-
-  public boolean hasNoMoreVerificationAttempts() {
-    return verificationAttemptNb > MAX_VERIFICATION_ATTEMPT_NB;
+  public boolean isVerified() {
+    return verifiedAt != null;
   }
 
-  public VerificationStatus getVerificationStatus() {
-    if (confirmedAmount != null) {
-      return VerificationStatus.SUCCEEDED;
-    }
-    if (pspReportedFailure || hasNoMoreVerificationAttempts()) {
-      return VerificationStatus.FAILED;
-    }
-    return VerificationStatus.VERIFYING;
+  public Long effectiveAmount() {
+    return confirmedAmount != null ? confirmedAmount : claimedAmount;
   }
 }
