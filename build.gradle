@@ -49,6 +49,11 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test:3.2.2'
+    // TestRestTemplate's default JDK HttpURLConnection-backed request factory throws
+    // HttpRetryException ("cannot retry due to server authentication, in streaming mode") when a
+    // POST with a body gets back a 401 - a JDK-level quirk, not an application bug. Apache
+    // HttpClient doesn't have this limitation; see FacadeIT.
+    testImplementation 'org.apache.httpcomponents.client5:httpclient5:5.3.1'
     testImplementation 'org.testcontainers:testcontainers:2.0.2'
     testImplementation 'org.testcontainers:testcontainers-postgresql:2.0.2'
     testImplementation 'org.testcontainers:testcontainers-junit-jupiter:2.0.2'
