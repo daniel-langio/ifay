@@ -19,13 +19,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
- * MVola's merchant payment API - built from general knowledge of the MVola API v1 shape
- * (OAuth2 client-credentials token, then a "merchantpay" transaction type: initiate a payment
- * request that prompts the payer's phone for approval, then poll a status endpoint until it
- * resolves). NOT verified against MVola's real API Developer docs yet - the exact endpoint
- * paths, header names, and request/response field names here need confirming once real sandbox
- * credentials are available. Treat every constant/path below as a best-effort starting point,
- * not a guarantee.
+ * MVola's merchant payment API - built from general knowledge of the MVola API v1 shape (OAuth2
+ * client-credentials token, then a "merchantpay" transaction type: initiate a payment request
+ * that prompts the payer's phone for approval, then poll a status endpoint until it resolves),
+ * cross-checked against a second, independent implementation (mandaniainarandriambinintsoa/
+ * paidmada-mobile-money on GitHub, MIT-licensed, references the real MVola devportal docs) which
+ * agreed on the token/initiate flow shape but corrected two real mistakes this had: the status
+ * endpoint has no "/status/" path segment, and the initiate payload needs
+ * originalTransactionReference + a metadata array. Still NOT verified against a real MVola
+ * sandbox - treat every constant/path below as a well-corroborated starting point, not a
+ * guarantee.
  */
 @Slf4j
 @Component
@@ -69,21 +72,24 @@ public class MvolaApiClient {
   public MvolaInitiateResponse initiatePayment(String payerMsisdn, long amount, String ourReference) {
     var token = fetchAccessToken();
     var correlationId = UUID.randomUUID().toString();
+    var description = "ifay payment";
     var body =
         Map.of(
             "amount", String.valueOf(amount),
             "currency", "Ar",
-            "descriptionText", "ifay payment",
+            "descriptionText", description.substring(0, Math.min(description.length(), 40)),
             "requestingOrganisationTransactionReference", ourReference,
             "requestDate", Instant.now().toString(),
+            "originalTransactionReference", ourReference,
             "debitParty", List.of(Map.of("key", "msisdn", "value", payerMsisdn)),
-            "creditParty", List.of(Map.of("key", "msisdn", "value", config.getMerchantMsisdn())));
+            "creditParty", List.of(Map.of("key", "msisdn", "value", config.getMerchantMsisdn())),
+            "metadata", List.of(Map.of("key", "partnerName", "value", config.getPartnerName())));
 
     HttpRequest httpRequest;
     try {
       httpRequest =
           HttpRequest.newBuilder()
-              .uri(URI.create(config.getApiUrl() + "/mvola/mm/transactions/type/merchantpay/1.0.0/"))
+              .uri(URI.create(config.getApiUrl() + "/mvola/mm/transactions/type/merchantpay/1.0.0"))
               .header("Authorization", "Bearer " + token)
               .header("Version", "1.0")
               .header("X-CorrelationID", correlationId)
@@ -91,6 +97,7 @@ public class MvolaApiClient {
               .header("UserAccountIdentifier", "msisdn;" + config.getMerchantMsisdn())
               .header("partnerName", config.getPartnerName())
               .header("Content-Type", "application/json")
+              .header("Cache-Control", "no-cache")
               .POST(HttpRequest.BodyPublishers.ofString(OM.writeValueAsString(body)))
               .build();
     } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
@@ -108,7 +115,7 @@ public class MvolaApiClient {
             .uri(
                 URI.create(
                     config.getApiUrl()
-                        + "/mvola/mm/transactions/type/merchantpay/1.0.0/status/"
+                        + "/mvola/mm/transactions/type/merchantpay/1.0.0/"
                         + serverCorrelationId))
             .header("Authorization", "Bearer " + token)
             .header("Version", "1.0")
@@ -116,6 +123,7 @@ public class MvolaApiClient {
             .header("UserLanguage", "FR")
             .header("UserAccountIdentifier", "msisdn;" + config.getMerchantMsisdn())
             .header("partnerName", config.getPartnerName())
+            .header("Cache-Control", "no-cache")
             .GET()
             .build();
 

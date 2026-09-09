@@ -15,9 +15,14 @@ a status endpoint), so there's no need for vola's batch/event-driven reconciliat
 - The MVola merchant account is still being set up - nothing here has been tested against a real
   MVola sandbox or production endpoint.
 - The exact API shape in `mvola/` (endpoint paths, header names, request/response fields) is
-  built from general knowledge of MVola's API, **not verified against their real API Developer
-  docs**. Once sandbox credentials exist, cross-check every constant in `MvolaApiClient` and the
-  two response records against the real docs before relying on this for anything real.
+  built from general knowledge of MVola's API, cross-checked against a second, independent
+  open-source implementation ([paidmada-mobile-money](https://github.com/mandaniainarandriambinintsoa/paidmada-mobile-money),
+  MIT-licensed, references the real MVola devportal) which agreed on the overall shape and
+  caught two real mistakes here (a wrong status-endpoint path, a missing payload field) - but
+  it's **still not verified against a real MVola sandbox**, and that project itself isn't
+  battle-tested (small, early-stage, no confirmed production usage found). Once real sandbox
+  credentials exist, confirm every constant in `MvolaApiClient` and the response records against
+  MVola's actual docs/responses before relying on this for anything real.
 
 ## API
 

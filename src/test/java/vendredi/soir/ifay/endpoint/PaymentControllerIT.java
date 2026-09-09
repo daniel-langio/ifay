@@ -44,7 +44,7 @@ class PaymentControllerIT extends FacadeIT {
     var id = created.getBody().id();
 
     when(mvolaApiClient.statusOf("server-correlation-1"))
-        .thenReturn(new MvolaTransactionStatusResponse("pending", null, null));
+        .thenReturn(new MvolaTransactionStatusResponse("pending", null, null, null));
     var stillVerifying =
         rest.exchange(
             "/payments/" + id,
@@ -54,7 +54,7 @@ class PaymentControllerIT extends FacadeIT {
     assertEquals(VerificationStatus.VERIFYING, stillVerifying.getBody().status());
 
     when(mvolaApiClient.statusOf("server-correlation-1"))
-        .thenReturn(new MvolaTransactionStatusResponse("completed", "server-correlation-1", "1000"));
+        .thenReturn(new MvolaTransactionStatusResponse("completed", null, "server-correlation-1", "1000"));
     var succeeded =
         rest.exchange(
             "/payments/" + id,
