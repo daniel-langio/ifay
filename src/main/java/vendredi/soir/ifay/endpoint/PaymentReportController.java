@@ -35,7 +35,8 @@ public class PaymentReportController {
             r.amount(),
             r.verifier().appId(),
             r.verifier().version(),
-            r.verifier().revision());
+            r.verifier().revision(),
+            r.verificationType());
     return new PaymentController.PaymentResponse(
         payment.id(), payment.isVerified() ? "VERIFIED" : "PENDING", payment.effectiveAmount());
   }
@@ -65,6 +66,11 @@ public class PaymentReportController {
 
   public record VerifierInfo(String appId, String version, String revision) {}
 
+  /**
+   * {@code verificationType} is an opaque string the verifier app supplies (e.g. "SMS_AUTO") -
+   * ifay stores it as-is and defaults it to "SMS_AUTO" server-side if omitted, so older/other
+   * verifier callers that don't send it yet stay compatible.
+   */
   public record CreateReportRequest(
-      Provider type, String pspRef, Long amount, VerifierInfo verifier) {}
+      Provider type, String pspRef, Long amount, VerifierInfo verifier, String verificationType) {}
 }

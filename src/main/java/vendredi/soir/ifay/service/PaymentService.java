@@ -1,5 +1,6 @@
 package vendredi.soir.ifay.service;
 
+import java.util.List;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -7,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import vendredi.soir.ifay.endpoint.exception.NotFoundException;
 import vendredi.soir.ifay.model.Payment;
 import vendredi.soir.ifay.model.Provider;
+import vendredi.soir.ifay.repository.PaymentEntity;
 import vendredi.soir.ifay.repository.PaymentMapper;
 import vendredi.soir.ifay.repository.PaymentRepository;
 
@@ -37,9 +39,34 @@ public class PaymentService {
       long amount,
       String verifierAppId,
       String verifierVersion,
-      String verifierRevision) {
+      String verifierRevision,
+      String verificationType) {
     return transactions.recordReport(
-        type, normalizeRef(rawPspRef), amount, verifierAppId, verifierVersion, verifierRevision);
+        type,
+        normalizeRef(rawPspRef),
+        amount,
+        verifierAppId,
+        verifierVersion,
+        verifierRevision,
+        verificationType);
+  }
+
+  /** Null selects every payment; true/false filters to verified/unverified only. */
+  @Transactional(readOnly = true)
+  public List<Payment> listForReceiver(UUID receiverId, Boolean verified) {
+    List<PaymentEntity> entities;
+    if (verified == null) {
+      entities = paymentRepository.findByReceiverId(receiverId);
+    } else if (verified) {
+      entities = paymentRepository.findByReceiverIdAndVerifiedAtIsNotNull(receiverId);
+    } else {
+      entities = paymentRepository.findByReceiverIdAndVerifiedAtIsNull(receiverId);
+    }
+    return entities.stream().map(paymentMapper::toDomain).toList();
+  }
+
+  public Payment recordManualVerification(String paymentId, UUID receiverId) {
+    return transactions.recordManualVerification(UUID.fromString(paymentId), receiverId);
   }
 
   /**
