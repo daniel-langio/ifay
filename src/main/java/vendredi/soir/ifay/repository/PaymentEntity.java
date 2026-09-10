@@ -34,4 +34,5 @@ public class PaymentEntity {
   private Instant sentAt;
   private Instant receivedAt;
   private Instant verifiedAt;
+  private String verificationType;
 }

@@ -1,5 +1,6 @@
 package vendredi.soir.ifay.repository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -12,4 +13,10 @@ import vendredi.soir.ifay.model.Provider;
  */
 public interface PaymentRepository extends JpaRepository<PaymentEntity, UUID> {
   Optional<PaymentEntity> findByTypeAndPspRef(Provider type, String pspRef);
+
+  List<PaymentEntity> findByReceiverId(UUID receiverId);
+
+  List<PaymentEntity> findByReceiverIdAndVerifiedAtIsNotNull(UUID receiverId);
+
+  List<PaymentEntity> findByReceiverIdAndVerifiedAtIsNull(UUID receiverId);
 }

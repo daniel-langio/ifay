@@ -5,6 +5,8 @@ import java.util.UUID;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import vendredi.soir.ifay.endpoint.exception.NotFoundException;
+import vendredi.soir.ifay.endpoint.exception.UnauthorizedException;
 import vendredi.soir.ifay.model.Payment;
 import vendredi.soir.ifay.model.PaymentEventType;
 import vendredi.soir.ifay.model.Provider;
@@ -77,7 +79,8 @@ class PaymentTransactions {
       long amount,
       String verifierAppId,
       String verifierVersion,
-      String verifierRevision) {
+      String verifierRevision,
+      String verificationType) {
     ChainTipEntity tip = lockTip();
     UUID verifierId = verifierService.findOrCreate(verifierAppId, verifierVersion, verifierRevision);
     Instant now = Instant.now();
@@ -99,6 +102,50 @@ class PaymentTransactions {
     PaymentEntity payment = findOrCreatePaymentRow(type, pspRef);
     payment.setVerifierId(verifierId);
     payment.setConfirmedAmount(amount);
+    payment.setReceivedAt(now);
+    payment.setVerificationType(verificationType != null ? verificationType : "SMS_AUTO");
+    maybeVerify(payment);
+    paymentRepository.save(payment);
+    return paymentMapper.toDomain(payment);
+  }
+
+  /**
+   * A receiver vouching for a claim without any independent report - reuses {@link
+   * #maybeVerify}'s exact invariant (both {@code sentAt} and {@code receivedAt} present) by
+   * setting {@code receivedAt} here too, the same field a real report would set. Idempotent: a
+   * second call on an already-verified payment is a no-op, not an error.
+   */
+  @Transactional
+  Payment recordManualVerification(UUID paymentId, UUID receiverId) {
+    ChainTipEntity tip = lockTip();
+    PaymentEntity payment =
+        paymentRepository
+            .findById(paymentId)
+            .orElseThrow(() -> new NotFoundException("No payment with id " + paymentId));
+    if (!receiverId.equals(payment.getReceiverId())) {
+      throw new UnauthorizedException("This payment does not belong to the authenticated receiver");
+    }
+    if (payment.getVerifiedAt() != null) {
+      return paymentMapper.toDomain(payment);
+    }
+
+    Instant now = Instant.now();
+    PaymentEventEntity event =
+        PaymentEventEntity.builder()
+            .id(UUID.randomUUID())
+            .sequence(tip.getSequence() + 1)
+            .pspRef(payment.getPspRef())
+            .type(payment.getType())
+            .eventType(PaymentEventType.MANUAL_VERIFICATION_RECORDED)
+            .receiverId(receiverId)
+            .confirmedAmount(payment.getClaimedAmount())
+            .occurredAt(now)
+            .previousEventHash(tip.getTipHash())
+            .build();
+    appendEvent(tip, event);
+
+    payment.setConfirmedAmount(payment.getClaimedAmount());
+    payment.setVerificationType("MANUAL");
     payment.setReceivedAt(now);
     maybeVerify(payment);
     paymentRepository.save(payment);

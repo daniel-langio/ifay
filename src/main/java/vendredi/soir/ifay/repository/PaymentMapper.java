@@ -25,6 +25,7 @@ public class PaymentMapper {
         .sentAt(e.getSentAt())
         .receivedAt(e.getReceivedAt())
         .verifiedAt(e.getVerifiedAt())
+        .verificationType(e.getVerificationType())
         .build();
   }
 
