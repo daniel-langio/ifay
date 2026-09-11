@@ -23,7 +23,11 @@ public class PaymentEntity {
 
   private String pspRef;
 
+  // See PaymentEventEntity's identical field for why columnDefinition is required here -
+  // without it, Hibernate generates a CHECK constraint off Provider's current constants that
+  // `ddl-auto=update` never widens when a new provider is added later.
   @Enumerated(EnumType.STRING)
+  @Column(columnDefinition = "varchar(32)")
   private Provider type;
 
   private UUID senderId;
