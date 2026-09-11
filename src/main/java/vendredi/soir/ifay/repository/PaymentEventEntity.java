@@ -29,10 +29,20 @@ public class PaymentEventEntity {
 
   private String pspRef;
 
+  // columnDefinition is required on every enum-mapped column below: without it, Hibernate infers
+  // the column type from the enum's *current* constant set and generates a CHECK constraint
+  // listing them - `ddl-auto=update` then never widens that constraint when a new constant is
+  // added later (it only adds missing columns/tables), so the column silently rejects any new
+  // enum value at the database level even though the Java code compiles and expects it to work.
+  // This bit real production traffic once (see git history) - explicit varchar keeps enum-value
+  // validity a purely Java-level concern, matching how `verificationType` (a plain String) never
+  // had this problem to begin with.
   @Enumerated(EnumType.STRING)
+  @Column(columnDefinition = "varchar(32)")
   private Provider type;
 
   @Enumerated(EnumType.STRING)
+  @Column(columnDefinition = "varchar(64)")
   private PaymentEventType eventType;
 
   private UUID senderId;
