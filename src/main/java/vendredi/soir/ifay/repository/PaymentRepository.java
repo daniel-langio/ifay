@@ -19,4 +19,10 @@ public interface PaymentRepository extends JpaRepository<PaymentEntity, UUID> {
   List<PaymentEntity> findByReceiverIdAndVerifiedAtIsNotNull(UUID receiverId);
 
   List<PaymentEntity> findByReceiverIdAndVerifiedAtIsNull(UUID receiverId);
+
+  List<PaymentEntity> findBySenderId(UUID senderId);
+
+  List<PaymentEntity> findBySenderIdAndVerifiedAtIsNotNull(UUID senderId);
+
+  List<PaymentEntity> findBySenderIdAndVerifiedAtIsNull(UUID senderId);
 }
