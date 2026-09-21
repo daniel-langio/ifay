@@ -70,6 +70,23 @@ public class PaymentService {
   }
 
   /**
+   * Null selects every payment; true/false filters to verified/unverified only - mirrors {@link
+   * #listForReceiver}, the other side of the same {@code (type, pspRef)} match.
+   */
+  @Transactional(readOnly = true)
+  public List<Payment> listForSender(UUID senderId, Boolean verified) {
+    List<PaymentEntity> entities;
+    if (verified == null) {
+      entities = paymentRepository.findBySenderId(senderId);
+    } else if (verified) {
+      entities = paymentRepository.findBySenderIdAndVerifiedAtIsNotNull(senderId);
+    } else {
+      entities = paymentRepository.findBySenderIdAndVerifiedAtIsNull(senderId);
+    }
+    return entities.stream().map(paymentMapper::toDomain).toList();
+  }
+
+  /**
    * Case matters for matching (a player types a Ref/Trans Id in whatever case their own
    * confirmation shows it, while a verifier's own SMS parser may normalize text to lowercase
    * before extracting one) - normalize both sides identically so a case difference alone never

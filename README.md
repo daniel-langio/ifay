@@ -32,7 +32,23 @@ represent different trust levels.
 - `POST /payments/reports` - `{type, pspRef, amount, verifier: {appId, version, revision}}`
   (verifier API key, `revision` optional) → records that the named verifier app directly observed
   a payment matching `pspRef`. Returns the same `{id, status, amount}` shape; `amount` here is
-  always the verifier-confirmed amount once verified, never the claimed one.
+  always the verifier-confirmed amount once verified, never the claimed one. Direction-agnostic:
+  the same endpoint reports a "money received" observation and a "money sent" observation alike,
+  since it only ever matches by `(type, pspRef)`.
+- `POST /receivers/api-keys` - `{phoneNumber}` (verifier API key) → mints a static, per-receiver
+  API key scoping subsequent calls to that one receiver. Returns `{receiverApiKey}` (shown once).
+- `GET /payments?verified=` - (receiver API key) list the authenticated receiver's own payments;
+  `verified` one of `true`/`false`/omitted-or-`all`.
+- `POST /payments/{id}/verify` - (receiver API key) the receiver vouching for a claim without an
+  independent report.
+- `POST /senders/api-keys` - `{phoneNumber}` (verifier API key) → mints a static, per-sender API
+  key, the same mechanics as `/receivers/api-keys` for the other side of a payment. Returns
+  `{senderApiKey}` (shown once).
+- `GET /payments/sent?verified=` - (sender API key) list the authenticated sender's own payments -
+  the other side of `GET /payments`. No manual-verify counterpart: a claim already sets its "sent"
+  side unconditionally the moment it's recorded, so the only thing still missing for verification
+  is independent confirmation that the money was *received* - only the receiver, or a verifier
+  report (e.g. porofo reading the sender's own "sent" SMS), is positioned to supply that.
 
 `type` is one of `MVOLA`, `ORANGE_MONEY`, `AIRTEL_MONEY`. `pspRef` is normalized
 (`trim().toUpperCase()`) on both the claim and report side before matching, so case differences

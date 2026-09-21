@@ -196,6 +196,111 @@ class PaymentEndpointsIT extends FacadeIT {
     return response.getBody().receiverApiKey();
   }
 
+  private String bootstrapSenderKey(String phoneNumber) {
+    ResponseEntity<SenderController.SenderApiKeyResponse> response =
+        rest.exchange(
+            "/senders/api-keys",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new SenderController.CreateSenderApiKeyRequest(phoneNumber), verifierHeaders()),
+            SenderController.SenderApiKeyResponse.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    return response.getBody().senderApiKey();
+  }
+
+  @Test
+  void sender_sees_own_pending_claim_and_a_sent_sms_report_verifies_it() {
+    String pspRef = "sender-list-ref";
+    String senderPhone = "+261340002001";
+    String receiverPhone = "+261340002002";
+    rest.exchange(
+        "/payments/claims",
+        HttpMethod.POST,
+        new HttpEntity<>(
+            new PaymentController.CreateClaimRequest(
+                senderPhone, receiverPhone, 1000L, Provider.MVOLA, pspRef),
+            clientHeaders()),
+        PaymentController.PaymentResponse.class);
+
+    String senderKey = bootstrapSenderKey(senderPhone);
+    ResponseEntity<PaymentSentQueryController.PaymentSentListItemResponse[]> beforeList =
+        rest.exchange(
+            "/payments/sent?verified=false",
+            HttpMethod.GET,
+            new HttpEntity<>(receiverHeaders(senderKey)),
+            PaymentSentQueryController.PaymentSentListItemResponse[].class);
+    assertThat(beforeList.getBody()).hasSize(1);
+    assertThat(beforeList.getBody()[0].receiverPhone()).isEqualTo(receiverPhone);
+
+    rest.exchange(
+        "/payments/reports",
+        HttpMethod.POST,
+        new HttpEntity<>(
+            new PaymentReportController.CreateReportRequest(
+                Provider.MVOLA,
+                pspRef,
+                1000L,
+                new PaymentReportController.VerifierInfo("mg.langio.porofo", "1.0.0", null),
+                null),
+            verifierHeaders()),
+        PaymentController.PaymentResponse.class);
+
+    ResponseEntity<PaymentSentQueryController.PaymentSentListItemResponse[]> afterList =
+        rest.exchange(
+            "/payments/sent?verified=all",
+            HttpMethod.GET,
+            new HttpEntity<>(receiverHeaders(senderKey)),
+            PaymentSentQueryController.PaymentSentListItemResponse[].class);
+    assertThat(afterList.getBody()).hasSize(1);
+    assertThat(afterList.getBody()[0].verified()).isTrue();
+    assertThat(afterList.getBody()[0].verificationType()).isEqualTo("SMS_AUTO");
+  }
+
+  @Test
+  void sender_never_sees_another_senders_payment() {
+    String pspRef = "cross-sender-ref";
+    rest.exchange(
+        "/payments/claims",
+        HttpMethod.POST,
+        new HttpEntity<>(
+            new PaymentController.CreateClaimRequest(
+                "+261340002003", "+261340002004", 1000L, Provider.MVOLA, pspRef),
+            clientHeaders()),
+        PaymentController.PaymentResponse.class);
+    String otherSenderKey = bootstrapSenderKey("+261340002005");
+
+    ResponseEntity<PaymentSentQueryController.PaymentSentListItemResponse[]> list =
+        rest.exchange(
+            "/payments/sent?verified=all",
+            HttpMethod.GET,
+            new HttpEntity<>(receiverHeaders(otherSenderKey)),
+            PaymentSentQueryController.PaymentSentListItemResponse[].class);
+    assertThat(list.getBody()).isEmpty();
+  }
+
+  @Test
+  void invalid_sender_key_is_rejected_on_list() {
+    ResponseEntity<String> response =
+        rest.exchange(
+            "/payments/sent",
+            HttpMethod.GET,
+            new HttpEntity<>(receiverHeaders("not-a-real-key")),
+            String.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+  }
+
+  @Test
+  void bootstrapping_a_sender_key_rejects_a_malformed_phone_number() {
+    ResponseEntity<String> response =
+        rest.exchange(
+            "/senders/api-keys",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new SenderController.CreateSenderApiKeyRequest("0340000001"), verifierHeaders()),
+            String.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
   private HttpHeaders receiverHeaders(String key) {
     HttpHeaders headers = new HttpHeaders();
     headers.set("X-Api-Key", key);
