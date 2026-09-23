@@ -172,8 +172,19 @@ class PaymentTransactions {
         .orElseGet(() -> PaymentEntity.builder().id(UUID.randomUUID()).type(type).pspRef(pspRef).build());
   }
 
+  /**
+   * Both sides must have shown up ({@code sentAt}/{@code receivedAt} present) *and* the
+   * verifier's reported amount must cover the claimed amount - a report for less than what was
+   * claimed never verifies the payment, even if the {@code (type, pspRef)} matches. Overpaying
+   * (report &gt; claim) still verifies.
+   */
   private void maybeVerify(PaymentEntity e) {
-    if (e.getSentAt() != null && e.getReceivedAt() != null && e.getVerifiedAt() == null) {
+    if (e.getSentAt() != null
+        && e.getReceivedAt() != null
+        && e.getVerifiedAt() == null
+        && e.getConfirmedAmount() != null
+        && e.getClaimedAmount() != null
+        && e.getConfirmedAmount() >= e.getClaimedAmount()) {
       e.setVerifiedAt(Instant.now());
     }
   }

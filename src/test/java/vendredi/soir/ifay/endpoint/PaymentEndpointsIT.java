@@ -358,6 +358,71 @@ class PaymentEndpointsIT extends FacadeIT {
   }
 
   @Test
+  void report_for_less_than_the_claimed_amount_does_not_verify_the_payment() {
+    String pspRef = "underpaid-ref";
+
+    ResponseEntity<PaymentController.PaymentResponse> claimResponse =
+        rest.exchange(
+            "/payments/claims",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentController.CreateClaimRequest(
+                    "+261340000001", "+261340000002", 1000L, Provider.MVOLA, pspRef),
+                clientHeaders()),
+            PaymentController.PaymentResponse.class);
+    assertThat(claimResponse.getBody().status()).isEqualTo("PENDING");
+
+    ResponseEntity<PaymentController.PaymentResponse> reportResponse =
+        rest.exchange(
+            "/payments/reports",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentReportController.CreateReportRequest(
+                    Provider.MVOLA,
+                    pspRef,
+                    900L,
+                    new PaymentReportController.VerifierInfo("mg.langio.porofo", "1.0.0", null),
+                    null),
+                verifierHeaders()),
+            PaymentController.PaymentResponse.class);
+
+    assertThat(reportResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(reportResponse.getBody().status()).isEqualTo("PENDING");
+    assertThat(reportResponse.getBody().amount()).isEqualTo(900L);
+  }
+
+  @Test
+  void report_for_more_than_the_claimed_amount_still_verifies_the_payment() {
+    String pspRef = "overpaid-ref";
+
+    rest.exchange(
+        "/payments/claims",
+        HttpMethod.POST,
+        new HttpEntity<>(
+            new PaymentController.CreateClaimRequest(
+                "+261340000001", "+261340000002", 1000L, Provider.MVOLA, pspRef),
+            clientHeaders()),
+        PaymentController.PaymentResponse.class);
+
+    ResponseEntity<PaymentController.PaymentResponse> reportResponse =
+        rest.exchange(
+            "/payments/reports",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentReportController.CreateReportRequest(
+                    Provider.MVOLA,
+                    pspRef,
+                    1100L,
+                    new PaymentReportController.VerifierInfo("mg.langio.porofo", "1.0.0", null),
+                    null),
+                verifierHeaders()),
+            PaymentController.PaymentResponse.class);
+
+    assertThat(reportResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(reportResponse.getBody().status()).isEqualTo("VERIFIED");
+  }
+
+  @Test
   void report_then_claim_verifies_the_payment() {
     String pspRef = "report-then-claim-ref";
 

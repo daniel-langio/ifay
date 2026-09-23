@@ -11,6 +11,11 @@ import lombok.Builder;
  * {@code (type, pspRef)}: that's the one thing that must match between them - once verified,
  * {@code confirmedAmount} (the verifier's report) is authoritative, never {@code claimedAmount}.
  *
+ * {@code verifiedAt} is only set once the verifier's {@code confirmedAmount} covers (is greater
+ * than or equal to) {@code claimedAmount} - a report for less than what was claimed leaves the
+ * payment unverified even once both sides have reported, in addition to the {@code (type,
+ * pspRef)} match on the row itself.
+ *
  * This is a materialized read-model, kept in sync with the append-only, hash-chained
  * {@code PaymentEvent} log (see {@link PaymentEventType}) - the event log is the actual source of
  * truth for tamper-evidence, this record exists purely so reads stay simple and fast.

@@ -34,7 +34,10 @@ represent different trust levels.
   a payment matching `pspRef`. Returns the same `{id, status, amount}` shape; `amount` here is
   always the verifier-confirmed amount once verified, never the claimed one. Direction-agnostic:
   the same endpoint reports a "money received" observation and a "money sent" observation alike,
-  since it only ever matches by `(type, pspRef)`.
+  since it only ever matches by `(type, pspRef)`. Matching the ref alone isn't enough to flip
+  `status` to `VERIFIED`, though: the reported amount must also cover (`>=`) the claimed amount -
+  a report for less than what was claimed leaves the payment `PENDING` even once both sides have
+  reported (overpaying still verifies).
 - `POST /receivers/api-keys` - `{phoneNumber}` (verifier API key) → mints a static, per-receiver
   API key scoping subsequent calls to that one receiver. Returns `{receiverApiKey}` (shown once).
 - `GET /payments?verified=` - (receiver API key) list the authenticated receiver's own payments;
