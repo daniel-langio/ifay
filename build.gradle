@@ -40,6 +40,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web:3.2.2'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa:3.2.2'
     implementation 'org.postgresql:postgresql:42.6.0'
+    // Lets the datasource URL name a Cloud SQL instance directly
+    // (jdbc:postgresql:///db?cloudSqlInstance=...&socketFactory=com.google.cloud.sql.postgres.SocketFactory).
+    // Inert for any other URL, so pointing it back at Neon or a plain host needs no rebuild.
+    implementation 'com.google.cloud.sql:postgres-socket-factory:1.28.4'
     implementation 'org.hibernate.orm:hibernate-community-dialects:6.4.3.Final'
     implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.15.3'
 
