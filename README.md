@@ -27,7 +27,9 @@ represent different trust levels.
   phone numbers in E.164, e.g. `+261341234567`) → records a payer's claim that they paid
   `pspRef`. Returns `{id, status, amount}`, `status` one of `PENDING`/`VERIFIED`. `senderPhone`/
   `receiverPhone` resolve to a `Party` entity looked up (or created) by phone number - the same
-  number reused across payments always resolves to the same `Party`.
+  number reused across payments always resolves to the same `Party`. `pspRef` may be omitted - a
+  "to-send" claim, recorded before the payer has actually paid and so has no ref yet; see
+  `POST /payments/sent/{id}/verify` for how the sender attaches it once they have.
 - `GET /payments/claims/{id}` - (client API key) current status of a previously created claim.
 - `POST /payments/reports` - `{type, pspRef, amount, verifier: {appId, version, revision}}`
   (verifier API key, `revision` optional) → records that the named verifier app directly observed
@@ -48,10 +50,13 @@ represent different trust levels.
   key, the same mechanics as `/receivers/api-keys` for the other side of a payment. Returns
   `{senderApiKey}` (shown once).
 - `GET /payments/sent?verified=` - (sender API key) list the authenticated sender's own payments -
-  the other side of `GET /payments`. No manual-verify counterpart: a claim already sets its "sent"
-  side unconditionally the moment it's recorded, so the only thing still missing for verification
-  is independent confirmation that the money was *received* - only the receiver, or a verifier
-  report (e.g. porofo reading the sender's own "sent" SMS), is positioned to supply that.
+  the other side of `GET /payments`.
+- `POST /payments/sent/{id}/verify` - `{pspRef}` (sender API key) → attaches `pspRef` to the
+  sender's own still-ref-less "to-send" claim and verifies it - the sender self-attesting they
+  actually paid, now that they have the ref to prove it. Same trust level as
+  `POST /payments/{id}/verify` (no independent cross-check); not meant for a claim that already
+  has a ref. **TODO**: a stopgap - a future iteration should require some independent
+  corroboration of the ref rather than trusting the sender's word alone.
 
 `type` is one of `MVOLA`, `ORANGE_MONEY`, `AIRTEL_MONEY`. `pspRef` is normalized
 (`trim().toUpperCase()`) on both the claim and report side before matching, so case differences

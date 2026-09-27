@@ -9,7 +9,11 @@ import vendredi.soir.ifay.model.Payment;
 import vendredi.soir.ifay.model.Provider;
 import vendredi.soir.ifay.service.PaymentService;
 
-/** Client-facing: a payer's claim that they paid a given psp reference, and polling its status. */
+/**
+ * Client-facing: a payer's claim that they paid a given psp reference, and polling its status.
+ * {@code pspRef} may be omitted (a "to-send" claim - the payer hasn't paid yet and doesn't have
+ * one) - see {@link PaymentSentQueryController} for how the sender later attaches it.
+ */
 @RestController
 @RequestMapping("/payments/claims")
 @AllArgsConstructor
@@ -52,8 +56,8 @@ public class PaymentController {
     if (r.type() == null) {
       throw new BadRequestException("type is required");
     }
-    if (r.pspRef() == null || r.pspRef().isBlank()) {
-      throw new BadRequestException("pspRef is required");
+    if (r.pspRef() != null && r.pspRef().isBlank()) {
+      throw new BadRequestException("pspRef must not be blank when provided");
     }
   }
 

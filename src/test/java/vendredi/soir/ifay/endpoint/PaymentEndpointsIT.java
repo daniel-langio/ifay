@@ -257,6 +257,103 @@ class PaymentEndpointsIT extends FacadeIT {
   }
 
   @Test
+  void to_send_claim_has_no_ref_until_the_sender_inserts_it() {
+    String senderPhone = "+261340002006";
+    String receiverPhone = "+261340002007";
+    ResponseEntity<PaymentController.PaymentResponse> claimResponse =
+        rest.exchange(
+            "/payments/claims",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentController.CreateClaimRequest(
+                    senderPhone, receiverPhone, 1000L, Provider.MVOLA, null),
+                clientHeaders()),
+            PaymentController.PaymentResponse.class);
+    assertThat(claimResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    assertThat(claimResponse.getBody().status()).isEqualTo("PENDING");
+
+    String senderKey = bootstrapSenderKey(senderPhone);
+    ResponseEntity<PaymentSentQueryController.PaymentSentListItemResponse[]> beforeList =
+        rest.exchange(
+            "/payments/sent?verified=false",
+            HttpMethod.GET,
+            new HttpEntity<>(receiverHeaders(senderKey)),
+            PaymentSentQueryController.PaymentSentListItemResponse[].class);
+    assertThat(beforeList.getBody()).hasSize(1);
+    assertThat(beforeList.getBody()[0].pspRef()).isNull();
+
+    ResponseEntity<PaymentSentQueryController.PaymentSentListItemResponse> verifyResponse =
+        rest.exchange(
+            "/payments/sent/" + claimResponse.getBody().id() + "/verify",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentSentQueryController.VerifySentPaymentRequest("to-send-ref"),
+                receiverHeaders(senderKey)),
+            PaymentSentQueryController.PaymentSentListItemResponse.class);
+    assertThat(verifyResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+    assertThat(verifyResponse.getBody().pspRef()).isEqualTo("TO-SEND-REF");
+    assertThat(verifyResponse.getBody().verified()).isTrue();
+    assertThat(verifyResponse.getBody().verificationType()).isEqualTo("MANUAL_SENDER");
+  }
+
+  @Test
+  void inserting_a_ref_already_used_by_another_payment_is_rejected() {
+    String senderPhone = "+261340002008";
+    rest.exchange(
+        "/payments/claims",
+        HttpMethod.POST,
+        new HttpEntity<>(
+            new PaymentController.CreateClaimRequest(
+                senderPhone, "+261340002009", 1000L, Provider.MVOLA, "already-taken-ref"),
+            clientHeaders()),
+        PaymentController.PaymentResponse.class);
+    ResponseEntity<PaymentController.PaymentResponse> toSendClaim =
+        rest.exchange(
+            "/payments/claims",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentController.CreateClaimRequest(
+                    senderPhone, "+261340002010", 500L, Provider.MVOLA, null),
+                clientHeaders()),
+            PaymentController.PaymentResponse.class);
+    String senderKey = bootstrapSenderKey(senderPhone);
+
+    ResponseEntity<String> response =
+        rest.exchange(
+            "/payments/sent/" + toSendClaim.getBody().id() + "/verify",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentSentQueryController.VerifySentPaymentRequest("already-taken-ref"),
+                receiverHeaders(senderKey)),
+            String.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+  }
+
+  @Test
+  void sender_cannot_insert_a_ref_for_someone_elses_to_send_claim() {
+    ResponseEntity<PaymentController.PaymentResponse> toSendClaim =
+        rest.exchange(
+            "/payments/claims",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentController.CreateClaimRequest(
+                    "+261340002011", "+261340002012", 1000L, Provider.MVOLA, null),
+                clientHeaders()),
+            PaymentController.PaymentResponse.class);
+    String otherSenderKey = bootstrapSenderKey("+261340002013");
+
+    ResponseEntity<String> response =
+        rest.exchange(
+            "/payments/sent/" + toSendClaim.getBody().id() + "/verify",
+            HttpMethod.POST,
+            new HttpEntity<>(
+                new PaymentSentQueryController.VerifySentPaymentRequest("some-ref"),
+                receiverHeaders(otherSenderKey)),
+            String.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+  }
+
+  @Test
   void sender_never_sees_another_senders_payment() {
     String pspRef = "cross-sender-ref";
     rest.exchange(

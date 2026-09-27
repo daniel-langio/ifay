@@ -70,6 +70,16 @@ public class PaymentService {
   }
 
   /**
+   * Lets a sender attach the psp reference to their own still-ref-less "to-send" claim (one
+   * recorded via {@link #recordClaim} with no {@code pspRef} yet), self-attesting they sent the
+   * money - see {@link PaymentTransactions#recordSenderRefVerification} for the trust caveat.
+   */
+  public Payment recordSenderRefVerification(String paymentId, UUID senderId, String rawPspRef) {
+    return transactions.recordSenderRefVerification(
+        UUID.fromString(paymentId), senderId, normalizeRef(rawPspRef));
+  }
+
+  /**
    * Null selects every payment; true/false filters to verified/unverified only - mirrors {@link
    * #listForReceiver}, the other side of the same {@code (type, pspRef)} match.
    */
@@ -90,10 +100,11 @@ public class PaymentService {
    * Case matters for matching (a player types a Ref/Trans Id in whatever case their own
    * confirmation shows it, while a verifier's own SMS parser may normalize text to lowercase
    * before extracting one) - normalize both sides identically so a case difference alone never
-   * causes an otherwise-correct match to miss.
+   * causes an otherwise-correct match to miss. {@code null} passes through unchanged - a claim
+   * may not have a ref yet (see {@link #recordClaim}).
    */
   private static String normalizeRef(String rawPspRef) {
-    return rawPspRef.trim().toUpperCase();
+    return rawPspRef == null ? null : rawPspRef.trim().toUpperCase();
   }
 
   @Transactional(readOnly = true)

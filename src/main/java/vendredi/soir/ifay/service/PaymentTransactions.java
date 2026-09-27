@@ -5,6 +5,7 @@ import java.util.UUID;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import vendredi.soir.ifay.endpoint.exception.BadRequestException;
 import vendredi.soir.ifay.endpoint.exception.NotFoundException;
 import vendredi.soir.ifay.endpoint.exception.UnauthorizedException;
 import vendredi.soir.ifay.model.Payment;
@@ -152,6 +153,59 @@ class PaymentTransactions {
     return paymentMapper.toDomain(payment);
   }
 
+  /**
+   * A sender attaching the psp reference to their own "to-send" claim (one recorded via {@link
+   * #recordClaim} with no {@code pspRef} yet) once they've actually paid and self-attesting the
+   * payment went through - the mirror-image of {@link #recordManualVerification}, reusing the
+   * same {@code sentAt}/{@code receivedAt} invariant by setting {@code receivedAt} here too.
+   * Idempotent: a payment that already has a ref is returned as-is rather than erroring.
+   *
+   * TODO: this is a stopgap with the same trust level as {@link #recordManualVerification} (zero
+   * independent cross-check) - a future iteration should require some independent corroboration
+   * of the ref (e.g. the receiver confirming it, or an ifay-side lookup against the psp) rather
+   * than trusting the sender's word alone.
+   */
+  @Transactional
+  Payment recordSenderRefVerification(UUID paymentId, UUID senderId, String pspRef) {
+    ChainTipEntity tip = lockTip();
+    PaymentEntity payment =
+        paymentRepository
+            .findById(paymentId)
+            .orElseThrow(() -> new NotFoundException("No payment with id " + paymentId));
+    if (!senderId.equals(payment.getSenderId())) {
+      throw new UnauthorizedException("This payment does not belong to the authenticated sender");
+    }
+    if (payment.getPspRef() != null) {
+      return paymentMapper.toDomain(payment);
+    }
+    if (paymentRepository.findByTypeAndPspRef(payment.getType(), pspRef).isPresent()) {
+      throw new BadRequestException("pspRef " + pspRef + " is already used by another payment");
+    }
+
+    Instant now = Instant.now();
+    PaymentEventEntity event =
+        PaymentEventEntity.builder()
+            .id(UUID.randomUUID())
+            .sequence(tip.getSequence() + 1)
+            .pspRef(pspRef)
+            .type(payment.getType())
+            .eventType(PaymentEventType.MANUAL_VERIFICATION_RECORDED)
+            .senderId(senderId)
+            .confirmedAmount(payment.getClaimedAmount())
+            .occurredAt(now)
+            .previousEventHash(tip.getTipHash())
+            .build();
+    appendEvent(tip, event);
+
+    payment.setPspRef(pspRef);
+    payment.setConfirmedAmount(payment.getClaimedAmount());
+    payment.setVerificationType("MANUAL_SENDER");
+    payment.setReceivedAt(now);
+    maybeVerify(payment);
+    paymentRepository.save(payment);
+    return paymentMapper.toDomain(payment);
+  }
+
   private ChainTipEntity lockTip() {
     return chainTipRepository
         .findTipForUpdate()
@@ -166,7 +220,16 @@ class PaymentTransactions {
     chainTipRepository.save(tip);
   }
 
+  /**
+   * A {@code null} pspRef (a "to-send" claim awaiting its ref, see {@link #recordClaim}) always
+   * creates a fresh row rather than looking one up - Spring Data JPA turns a null-valued equality
+   * parameter into an `IS NULL` check, which would otherwise incorrectly reuse *any* other
+   * still-ref-less row of the same type instead of creating this claim's own row.
+   */
   private PaymentEntity findOrCreatePaymentRow(Provider type, String pspRef) {
+    if (pspRef == null) {
+      return PaymentEntity.builder().id(UUID.randomUUID()).type(type).build();
+    }
     return paymentRepository
         .findByTypeAndPspRef(type, pspRef)
         .orElseGet(() -> PaymentEntity.builder().id(UUID.randomUUID()).type(type).pspRef(pspRef).build());

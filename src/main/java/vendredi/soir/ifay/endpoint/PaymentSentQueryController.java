@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import vendredi.soir.ifay.endpoint.exception.BadRequestException;
 import vendredi.soir.ifay.model.Payment;
 import vendredi.soir.ifay.model.Provider;
 import vendredi.soir.ifay.service.PaymentService;
@@ -13,12 +14,15 @@ import vendredi.soir.ifay.service.PaymentService;
  * PaymentQueryController}. Scoped by {@link SenderApiKeyAuthorizer} alone, never by a phone
  * number the caller passes in.
  *
- * <p>Deliberately no manual-verify counterpart here: a claim already sets {@code sentAt}
- * unconditionally the moment it's recorded (see {@code PaymentTransactions#recordClaim}), so
- * there's nothing left for a sender to self-attest - the only field still missing for
- * verification is {@code receivedAt}, which only the receiver (or an independent verifier report,
- * e.g. porofo reading its own "sent" SMS) is positioned to supply. A sender self-attesting that
- * the other side received the money would defeat the point of independent verification.
+ * <p>A claim already sets {@code sentAt} unconditionally the moment it's recorded (see {@code
+ * PaymentTransactions#recordClaim}), and normally already carries its {@code pspRef} too - the
+ * only field still missing for verification is {@code receivedAt}, which only the receiver (or an
+ * independent verifier report, e.g. porofo reading its own "sent" SMS) is positioned to supply. A
+ * claim may, however, be recorded as a "to-send" claim with no {@code pspRef} yet (the payer
+ * hasn't paid at all when the claim is made) - {@link #verify} is how the sender later attaches
+ * the real ref once they've actually paid. That action is self-attested (same trust level as
+ * {@code PaymentQueryController#verify}'s receiver-side manual verify) - see the TODO on {@code
+ * PaymentTransactions#recordSenderRefVerification} for why that's a stopgap.
  */
 @RestController
 @RequestMapping("/payments/sent")
@@ -34,6 +38,21 @@ public class PaymentSentQueryController {
     return paymentService.listForSender(senderId, parseVerifiedFilter(verified)).stream()
         .map(PaymentSentQueryController::toListItem)
         .toList();
+  }
+
+  /** Attaches {@code pspRef} to a "to-send" claim (one recorded with no ref yet) and verifies
+   *  it - see the class doc for the trust caveat. Not meant for a claim that already has a ref;
+   *  use {@code PaymentQueryController#verify} on the receiver side for that case instead. */
+  @PostMapping("/{id}/verify")
+  public PaymentSentListItemResponse verify(
+      @RequestHeader("X-Api-Key") String apiKey,
+      @PathVariable String id,
+      @RequestBody VerifySentPaymentRequest r) {
+    UUID senderId = senderApiKeyAuthorizer.acceptSender(apiKey);
+    if (r == null || r.pspRef() == null || r.pspRef().isBlank()) {
+      throw new BadRequestException("pspRef is required");
+    }
+    return toListItem(paymentService.recordSenderRefVerification(id, senderId, r.pspRef()));
   }
 
   /** {@code null} or "all" selects every payment; "true"/"false" filters to one state. */
@@ -63,4 +82,6 @@ public class PaymentSentQueryController {
       boolean verified,
       String verificationType,
       String receiverPhone) {}
+
+  public record VerifySentPaymentRequest(String pspRef) {}
 }
